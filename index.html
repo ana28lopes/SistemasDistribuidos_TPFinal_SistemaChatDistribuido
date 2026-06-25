@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Distribuído</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            display: flex; justify-content: center; align-items: center; 
+            height: 100vh; margin: 0; background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%); 
+        }
+
+        /* CONTAINER DINÂMICO */
+        .container { 
+            background-color: white; border-radius: 15px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow: hidden;
+            transition: width 0.3s, height 0.3s;
+        }
+
+        /* --- LOGIN --- */
+        #tela-login { width: 380px; padding: 40px; text-align: center; }
+        .icone-usuario { width: 70px; height: 70px; background-color: #ff85a1; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto 20px; box-shadow: 0 4px 8px rgba(255, 133, 161, 0.3); }
+        .icone-usuario svg { width: 35px; height: 35px; fill: white; }
+        input.login-input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        input.login-input:focus { border-color: #ff85a1; outline: none; }
+        button.btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        button.btn-entrar { background-color: #ff6b8e; color: white; }
+        button.btn-entrar:hover { background-color: #ff85a1; }
+        button.btn-registrar { background-color: #fce4ec; color: #ff6b8e; }
+        button.btn-registrar:hover { background-color: #f8bbd0; }
+
+        /* --- CHAT (ESTILO WHATSAPP) --- */
+        #tela-chat { display: none; width: 800px; height: 600px; }
+        .chat-layout { display: flex; height: 100%; }
+        
+        /* Barra Lateral (Contatos) */
+        .sidebar { width: 30%; border-right: 1px solid #eee; background-color: #fcfcfc; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 15px; background-color: #ff6b8e; color: white; font-weight: bold; text-align: center; }
+        .lista-contatos { overflow-y: auto; flex: 1; }
+        .contato { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 10px; }
+        .contato:hover { background-color: #fce4ec; }
+        .contato.ativo { background-color: #ff85a1; color: white; }
+        .avatar { width: 40px; height: 40px; background-color: #ddd; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; }
+        .contato.ativo .avatar { background-color: white; color: #ff85a1; }
+
+        /* Área de Mensagens */
+        .chat-area { width: 70%; display: flex; flex-direction: column; background-color: #e5ddd5; position: relative;}
+        .chat-area::before { content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: url('https://www.transparenttextures.com/patterns/cubes.png'); opacity: 0.05; pointer-events: none;}
+        
+        .chat-header { padding: 15px; background-color: #f5f5f5; border-bottom: 1px solid #ddd; font-weight: bold; color: #333; display: flex; align-items: center; z-index: 1;}
+        .mensagens { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; z-index: 1;}
+        
+        /* Balões de Mensagem */
+        .balao { max-width: 70%; padding: 10px 15px; border-radius: 15px; font-size: 14px; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); clear: both; }
+        .balao-recebido { background-color: #fff; align-self: flex-start; border-top-left-radius: 0; }
+        .balao-enviado { background-color: #dcf8c6; align-self: flex-end; border-top-right-radius: 0; }
+        .balao-nome { font-size: 11px; font-weight: bold; color: #ff6b8e; margin-bottom: 3px; display: block; }
+        
+        /* Controles de Envio */
+        .chat-input { padding: 15px; background-color: #f0f0f0; display: flex; gap: 10px; z-index: 1;}
+        .chat-input input { flex: 1; padding: 12px; border: none; border-radius: 20px; outline: none; }
+        .chat-input button { padding: 10px 20px; background-color: #ff6b8e; color: white; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; }
+        
+        /* Bolinha de Notificação */
+        .bolinha-notificacao {
+            width: 12px;
+            height: 12px;
+            background-color: #ff3b30; /* Vermelho vivo */
+            border-radius: 50%;
+            margin-left: auto; /* Empurra a bolinha para o canto direito */
+            display: none; /* Começa escondida */
+            box-shadow: 0 0 5px rgba(255, 59, 48, 0.5);
+        }
+        /* Quando o contato ganhar a classe 'tem-mensagem', a bolinha aparece */
+        .contato.tem-mensagem .bolinha-notificacao {
+            display: block;
+        }
+    
+    </style>
+</head>
+<body>
+
+    <div class="container" id="container-principal">
+        
+        <!-- TELA DE LOGIN -->
+        <div id="tela-login">
+            <div class="icone-usuario">
+                <svg viewBox="0 0 24 24"><path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z" /></svg>
+            </div>
+            <h2 style="color: #333; margin-bottom: 25px;">Chat Distribuído</h2>
+            <input type="text" id="usuario" class="login-input" placeholder="Usuário" required>
+            <input type="password" id="senha" class="login-input" placeholder="Senha" required>
+            <button class="btn btn-entrar" onclick="fazerLogin()">Entrar</button>
+            <button class="btn btn-registrar" onclick="registrarUsuario()">Criar Conta</button>
+            <div id="status" style="margin-top: 15px; font-weight: bold; font-size: 14px;"></div>
+        </div>
+
+        <!-- TELA DO CHAT -->
+        <div id="tela-chat">
+            <div class="chat-layout">
+                <!-- Lista da Esquerda -->
+                <div class="sidebar">
+                    <div class="sidebar-header" id="nome-logado"></div>
+                    <div class="lista-contatos" id="lista-contatos">
+                        <!-- Contatos injetados via JS -->
+                    </div>
+                </div>
+
+                <!-- Painel da Direita -->
+                <div class="chat-area">
+                    <div class="chat-header" id="chat-titulo">Selecione um chat para começar</div>
+                    <div class="mensagens" id="caixa-mensagens">
+                        <!-- Balões de mensagem -->
+                    </div>
+                    <div class="chat-input">
+                        <input type="text" id="mensagem-input" placeholder="Digite sua mensagem...">
+                        <button onclick="enviarMensagem()">Enviar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const API_AUTH_URL = "http://127.0.0.1:8000"; 
+        const API_CHAT_URL = "http://127.0.0.1:8001";
+        
+        let usuarioAtual = ""; 
+        let contatoAtual = "grupo"; // Começa focado no grupo geral
+        let socket = null;
+
+        // --- FUNÇÕES DE AUTENTICAÇÃO ---
+        async function registrarUsuario() {
+            const u = document.getElementById('usuario').value;
+            const s = document.getElementById('senha').value;
+            const st = document.getElementById('status');
+            if(!u || !s) { st.innerText = "Preencha tudo!"; st.style.color = "red"; return; }
+
+            const res = await fetch(`${API_AUTH_URL}/registrar`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({usuario: u, senha: s}) });
+            st.innerText = res.ok ? "Conta criada! Faça login." : "Erro ao criar conta.";
+            st.style.color = res.ok ? "#ff6b8e" : "red";
+        }
+
+        async function fazerLogin() {
+            const u = document.getElementById('usuario').value;
+            const s = document.getElementById('senha').value;
+            const st = document.getElementById('status');
+
+            const res = await fetch(`${API_AUTH_URL}/login`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({usuario: u, senha: s}) });
+            if (res.ok) {
+                usuarioAtual = u;
+                document.getElementById('nome-logado').innerText = `Meu Perfil: ${usuarioAtual}`;
+                
+                document.getElementById('tela-login').style.display = "none";
+                document.getElementById('tela-chat').style.display = "block";
+                
+                carregarListaUsuarios();
+                iniciarChat();
+                selecionarContato('grupo'); // Abre o grupo por padrão
+            } else {
+                st.innerText = "Usuário ou senha incorretos"; st.style.color = "red";
+            }
+        }
+
+        async function carregarListaUsuarios() {
+            const res = await fetch(`${API_AUTH_URL}/usuarios`);
+            const usuarios = await res.json();
+            const lista = document.getElementById('lista-contatos');
+            
+            // Adiciona o Grupo Geral com a bolinha
+            lista.innerHTML = `
+                <div class="contato" id="contato-grupo" onclick="selecionarContato('grupo')">
+                    <div class="avatar" style="background-color: #ff6b8e;">G</div>
+                    <b>Grupo Geral</b>
+                    <div class="bolinha-notificacao"></div>
+                </div>
+            `;
+
+            // Adiciona os contatos com a bolinha
+            usuarios.forEach(u => {
+                if (u.usuario !== usuarioAtual) {
+                    const letra = u.usuario.charAt(0).toUpperCase();
+                    lista.innerHTML += `
+                        <div class="contato" id="contato-${u.usuario}" onclick="selecionarContato('${u.usuario}')">
+                            <div class="avatar">${letra}</div>
+                            <b>${u.usuario}</b>
+                            <div class="bolinha-notificacao"></div>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        async function selecionarContato(nome) {
+            contatoAtual = nome;
+            document.getElementById('chat-titulo').innerText = nome === 'grupo' ? "Conversando com: Grupo Geral" : `Conversando com: ${nome}`;
+            
+            // Estilizar o contato selecionado na lista
+            document.querySelectorAll('.contato').forEach(el => el.classList.remove('ativo'));
+            const contatoDiv = document.getElementById(`contato-${nome}`);
+            contatoDiv.classList.add('ativo');
+            
+            // NOVO: Limpa a bolinha de notificação ao abrir o chat
+            contatoDiv.classList.remove('tem-mensagem');
+
+            // Busca histórico no Banco de Dados
+            const res = await fetch(`${API_CHAT_URL}/historico/${nome}?remetente=${usuarioAtual}`);
+            const historico = await res.json();
+            
+            const caixa = document.getElementById('caixa-mensagens');
+            caixa.innerHTML = ""; 
+            
+            historico.forEach(msg => desenharBalao(msg.remetente, msg.mensagem));
+        }
+
+        function desenharBalao(remetente, texto) {
+            const caixa = document.getElementById('caixa-mensagens');
+            const ehMeu = remetente === usuarioAtual;
+            const classeBalao = ehMeu ? 'balao-enviado' : 'balao-recebido';
+            
+            caixa.innerHTML += `
+                <div class="balao ${classeBalao}">
+                    ${!ehMeu ? `<span class="balao-nome">${remetente}</span>` : ''}
+                    ${texto}
+                </div>
+            `;
+            caixa.scrollTop = caixa.scrollHeight;
+        }
+
+        // --- WEBSOCKET E TEMPO REAL ---
+        function iniciarChat() {
+            socket = io(API_CHAT_URL);
+            socket.on('connect', () => socket.emit('conectar_usuario', { usuario: usuarioAtual }));
+            
+            socket.on('receber_mensagem', (dados) => {
+                let pertenceAEstaTela = false;
+                
+                if (contatoAtual === 'grupo' && dados.destinatario === 'grupo') {
+                    pertenceAEstaTela = true;
+                } else if (contatoAtual !== 'grupo' && 
+                          ((dados.remetente === usuarioAtual && dados.destinatario === contatoAtual) || 
+                           (dados.remetente === contatoAtual && dados.destinatario === usuarioAtual))) {
+                    pertenceAEstaTela = true;
+                }
+
+                if (pertenceAEstaTela) {
+                    desenharBalao(dados.remetente, dados.mensagem);
+                } else if (dados.remetente !== usuarioAtual) {
+                    // NOVO: Ao invés de alert(), acende a bolinha no contato certo
+                    let idContatoNotificar = dados.destinatario === 'grupo' ? 'grupo' : dados.remetente;
+                    let contatoDiv = document.getElementById(`contato-${idContatoNotificar}`);
+                    
+                    if (contatoDiv) {
+                        contatoDiv.classList.add('tem-mensagem');
+                    }
+                }
+            });
+            // Escuta se alguém novo acabou de entrar no chat
+            socket.on('novo_usuario_online', (dados) => {
+                const lista = document.getElementById('lista-contatos');
+                
+                // Só adiciona se não for você mesmo e se o contato ainda não estiver na lista
+                if (dados.usuario !== usuarioAtual && !document.getElementById(`contato-${dados.usuario}`)) {
+                    const novoContato = document.createElement('div');
+                    novoContato.className = 'contato';
+                    novoContato.id = `contato-${dados.usuario}`;
+                    novoContato.onclick = () => selecionarContato(dados.usuario);
+                    
+                    const letra = dados.usuario.charAt(0).toUpperCase();
+                    novoContato.innerHTML = `
+                        <div class="avatar">${letra}</div>
+                        <b>${dados.usuario}</b>
+                        <div class="bolinha-notificacao"></div>
+                    `;
+                    lista.appendChild(novoContato);
+                }
+            });
+        }
+
+        function enviarMensagem() {
+            const input = document.getElementById('mensagem-input');
+            if(!input.value.trim()) return;
+
+            socket.emit('enviar_mensagem', {
+                remetente: usuarioAtual,
+                destinatario: contatoAtual,
+                mensagem: input.value
+            });
+            input.value = ""; 
+        }
+    </script>
+</body>
+</html>
